@@ -799,7 +799,7 @@ class GachaNew:
         msg = ctx['raw_message']
         sender_qqid = ctx["user_id"]
         regex = [
-            r"^(单抽|十连|抽一井|查看卡池) *(\S*)?$",
+            r"^(单抽|十连|抽一井|查看卡池) *(\S*池)? *$",
             r"^(仓库) *(?:\[CQ:at,qq=(\d+)\])? *$",
             r"^(转生) *$",
             r"^(充值) *(-?\d+)([Ww万Kk千])? *(?:\[CQ:at,qq=(\d+)\])? *$",
