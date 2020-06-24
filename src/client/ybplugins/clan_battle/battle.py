@@ -870,6 +870,19 @@ class ClanBattle:
             raise UserNotInGroup
         if (appli_type != 1) and (extra_msg is None):
             raise InputError('锁定boss时必须留言')
+
+        challenges = Clan_challenge.select().where(
+            Clan_challenge.gid == group_id,
+            Clan_challenge.qqid == qqid,
+            Clan_challenge.bid == group.battle_id,
+            Clan_challenge.challenge_pcrdate == pcr_datetime(area=group.game_server)[0],
+        ).order_by(Clan_challenge.cid)
+        challenges = list(challenges)
+        finished = sum(bool(c.boss_health_ramain or c.is_continue)
+                       for c in challenges)
+        if finished >= 3:
+            raise InputError('申请失败，今日报刀次数已达到3次')
+
         if group.challenging_member_qq_id is not None:
             nik = self._get_nickname_by_qqid(
                 group.challenging_member_qq_id,
@@ -1344,10 +1357,9 @@ class ClanBattle:
                 return '锁定时请留言'
             else:
                 match = re.match(r'^锁定(?:boss)? *(?:[\:：](.*))?$', cmd)
-                if not match:
-                    return
-                appli_type = 2
-                extra_msg = match.group(1)
+                if match:
+                    appli_type = 2
+                    extra_msg = match.group(1)
                 if isinstance(extra_msg, str):
                     extra_msg = extra_msg.strip()
                     if not extra_msg:
