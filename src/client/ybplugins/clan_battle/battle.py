@@ -327,6 +327,14 @@ class ClanBattle:
                 self._get_nickname_by_qqid(group.challenging_member_qq_id)
                 or group.challenging_member_qq_id
             )
+        report = self.get_report(group_id, None, None, pcr_datetime(group.game_server)[0])
+        count = 0
+        for x in report:
+            if x['health_ramain'] == 0 or x['is_continue']: count += 0.5
+            else: count += 1
+        if count == int(count):
+            count = int(count)
+        boss_summary += "\n今日已出 {} 刀。".format(count)
         return boss_summary
 
     def challenge(self,
