@@ -597,7 +597,7 @@ class GachaNew:
 
         msg = []
 
-        if gacha_name == "":
+        if gacha_name == "" or gacha_name is None:
             gacha_pool = self.gacha_mgr.default_pool
         else:
             gacha_pool = self.gacha_mgr.get_pool(gacha_name)
