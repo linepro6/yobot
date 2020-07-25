@@ -4,7 +4,7 @@ from playhouse.migrate import SqliteMigrator, migrate
 from .web_util import rand_string
 
 _db = SqliteDatabase(None)
-_version = 9  # 目前版本
+_version = 11  # 目前版本
 
 MAX_TRY_TIMES = 3
 
@@ -97,6 +97,7 @@ class Clan_challenge(_BaseModel):
     is_continue = BooleanField()  # 此刀是结余刀
     message = TextField(null=True)
     behalf = IntegerField(null=True)
+    team_id = IntegerField()
 
     class Meta:
         indexes = ((('bid', 'gid'), False),)
@@ -114,6 +115,21 @@ class Clan_subscribe(_BaseModel):
             (('gid', 'qqid', 'subscribe_item'), False),
         )
 
+class Clan_team(_BaseModel):
+    id = AutoField(primary_key=True)
+    name = TextField(null=False, unique=True)
+
+class Clan_simulation_challenge(_BaseModel):
+    cid = AutoField(primary_key=True)
+    bid = IntegerField(default=0)
+    gid = BigIntegerField()
+    qqid = BigIntegerField()
+    boss_cycle = SmallIntegerField()
+    boss_num = SmallIntegerField()
+    challenge_damage = BigIntegerField()
+    message = TextField(null=True)
+    behalf = IntegerField(null=True)
+    team_id = IntegerField()
 
 class Character(_BaseModel):
     chid = IntegerField(primary_key=True)
@@ -235,5 +251,12 @@ def db_upgrade(old_version):
         migrate(
             migrator.add_index('clan_member', ('qqid',), False)
         )
+    if old_version < 10:
+        Clan_team.create_table()
+        migrate(
+            migrator.add_column('clan_challenge', 'team_id', IntegerField(default=0))
+        )
+    if old_version < 11:
+        Clan_simulation_challenge.create_table()
 
     DB_schema.replace(key='version', value=str(_version)).execute()

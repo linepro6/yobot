@@ -15,13 +15,17 @@ from quart import (Quart, jsonify, make_response, redirect, request, session,
 
 from ..templating import render_template
 from ..web_util import async_cached_func
-from ..ybdata import (Clan_challenge, Clan_group, Clan_member, Clan_subscribe,
+from ..ybdata import (Clan_challenge, Clan_group, Clan_member, Clan_subscribe, Clan_team, Clan_simulation_challenge,
                       User)
 from .exception import (
     ClanBattleError, GroupError, GroupNotExist, InputError, UserError,
     UserNotInGroup)
 from .typing import BossStatus, ClanBattleReport, Groupid, Pcr_date, QQid
 from .util import atqq, pcr_datetime, pcr_timestamp, timed_cached_func
+
+import numpy as np
+from scipy import stats
+import csv
 
 _logger = logging.getLogger(__name__)
 
@@ -60,6 +64,7 @@ class ClanBattle:
         '查3': 23,
         '查4': 24,
         '查5': 25,
+        '模拟': 26,
     }
 
     Server = {
@@ -341,6 +346,7 @@ class ClanBattle:
                   group_id: Groupid,
                   qqid: QQid,
                   defeat: bool,
+                  team: str,
                   damage: Optional[int] = None,
                   behalfed: Optional[QQid] = None,
                   *,
@@ -356,6 +362,8 @@ class ClanBattle:
             damage: the damage dealt to boss
             behalfed: the real member who did the challenge
         """
+        if team is None or team == "":
+            raise InputError("必须提供队伍名称")
         if (not defeat) and (damage is None):
             raise InputError('未击败boss需要提供伤害值')
         if (not defeat) and (damage < 0):
@@ -414,6 +422,10 @@ class ClanBattle:
         else:
             boss_health_ramain = group.boss_health-damage
             challenge_damage = damage
+        
+        team = Clan_team.get_or_create(name=team)[0]
+        team_id = team.id
+
         challenge = Clan_challenge.create(
             gid=group_id,
             qqid=user.qqid,
@@ -427,6 +439,7 @@ class ClanBattle:
             is_continue=is_continue,
             message=extra_msg,
             behalf=behalf,
+            team_id=team_id
         )
         if defeat:
             if group.boss_num == 5:
@@ -480,6 +493,285 @@ class ClanBattle:
             self.notify_subscribe(group_id, group.boss_num)
 
         return status
+    
+    def simulation_challenge(self,
+                  group_id: Groupid,
+                  qqid: QQid,
+                  team: str,
+                  damage: Optional[int] = None,
+                  behalfed: Optional[QQid] = None,
+                  *,
+                  boss_cycle: Optional[int] = None,
+                  boss_num: Optional[int] = None,
+                  extra_msg: Optional[str] = None,
+                  ):
+        if damage < 0:
+            raise InputError('伤害不可以是负数')
+        group = Clan_group.get_or_none(group_id=group_id)
+        if group is None:
+            raise GroupNotExist
+        behalf = None
+        if behalfed is not None:
+            behalf = qqid
+            qqid = behalfed
+        user = User.get_or_create(
+            qqid=qqid,
+            defaults={
+                'clan_group_id': group_id,
+            }
+        )[0]
+        is_member = Clan_member.get_or_none(
+            group_id=group_id, qqid=qqid)
+        if not is_member:
+            raise UserNotInGroup
+       
+        is_member.last_message = extra_msg
+        is_member.save()
+        
+        team = Clan_team.get_or_create(name=team)[0]
+        team_id = team.id
+
+        challenge = Clan_simulation_challenge.create(
+            gid=group_id,
+            qqid=user.qqid,
+            bid=group.battle_id,
+            boss_cycle=group.boss_cycle if boss_cycle is None else boss_cycle,
+            boss_num=group.boss_num if boss_num is None else boss_num,
+            challenge_damage=damage,
+            message=extra_msg,
+            behalf=behalf,
+            team_id=team_id
+        )
+
+        challenge.save()
+
+        return "该模拟刀已成功记录"
+    
+    """
+    def queue_attack(self, group_id: Groupid, prob, boss_cycle: Optional[int]=None, boss_num: Optional[int]=None):
+        group = Clan_group.get_or_none(group_id=group_id)
+        date = pcr_datetime(area=group.game_server)[0]
+        boss_cycle = group.boss_cycle if boss_cycle is None else boss_cycle
+        boss_num = group.boss_num if boss_num is None else boss_num
+        attack_list = []
+        members = []
+        for user in User.select(
+            User, Clan_member,
+            ).join(
+                Clan_member,
+                on=(User.qqid == Clan_member.qqid),
+                attr='clan_member',
+            ).where(
+                Clan_member.group_id == group_id,
+                User.deleted == False,
+            ):
+                members.append(user)
+        for member in members:
+            mem_atkmap = {}
+            clist = Clan_challenge.select().where(
+                Clan_challenge.qqid == member.qqid,
+                Clan_challenge.bid == group.battle_id,
+                Clan_challenge.gid == group_id,
+                Clan_challenge.challenge_pcrdate == date
+            )
+            explist = []
+            for c in clist:
+                explist.append(Clan_team.get_by_id(c.team_id).name)
+            
+            clist = Clan_challenge.select().where(
+                Clan_challenge.qqid == member.qqid,
+                Clan_challenge.bid == group.battle_id,
+                Clan_challenge.gid == group_id,
+                Clan_challenge.is_continue == False,
+                Clan_challenge.boss_cycle == boss_cycle,
+                Clan_challenge.boss_num == boss_num
+            )
+
+            for c in clist:
+                team = Clan_team.get_by_id(c.team_id).name
+                if team in explist:
+                    continue # 排除今日已出刀的队伍
+                if mem_atkmap.get(team, None) is None:
+                    mem_atkmap[team] = [c.challenge_damage]
+                else:
+                    mem_atkmap[team].append(c.challenge_damage)
+            
+            clist = Clan_simulation_challenge.select().where(
+                Clan_simulation_challenge.qqid == member.qqid,
+                Clan_simulation_challenge.bid == group.battle_id,
+                Clan_simulation_challenge.gid == group_id,
+                Clan_simulation_challenge.boss_cycle == boss_cycle,
+                Clan_simulation_challenge.boss_num == boss_num
+            )
+            for c in clist:
+                team = Clan_team.get_by_id(c.team_id).name
+                if team in explist:
+                    continue # 排除今日已出刀的队伍
+                if mem_atkmap.get(team, None) is None:
+                    mem_atkmap[team] = [c.challenge_damage]
+                else:
+                    mem_atkmap[team].append(c.challenge_damage)
+            for team in mem_atkmap.keys():
+                array = np.array(mem_atkmap[team])
+                mu = np.mean(array)
+                sigma = np.std(array)
+                value = stats.norm.ppf(prob, loc=mu, scale=sigma)
+                attack_list.append((member.nickname, team, value))
+    """
+
+    def query_user_attacks(self, group_id: Groupid, qqid: QQid, team_id: Optional[int]=None, boss_cycle: Optional[int]=None, boss_num: Optional[int]=None):
+        group = Clan_group.get_or_none(group_id=group_id)
+        user = User.get_or_none(qqid=qqid)
+        attack_list = []
+        mem_atkmap = {}
+
+        expressions1 = [
+            Clan_challenge.qqid == qqid,
+            Clan_challenge.bid == group.battle_id,
+            Clan_challenge.gid == group_id,
+            Clan_challenge.boss_health_ramain != 0,
+            Clan_challenge.is_continue == False,
+        ]
+
+        expressions2 = [
+            Clan_simulation_challenge.qqid == qqid,
+            Clan_simulation_challenge.bid == group.battle_id,
+            Clan_simulation_challenge.gid == group_id,
+        ]
+        
+        if team_id is not None:
+            expressions1.append(Clan_challenge.team_id == team_id)
+            expressions2.append(Clan_simulation_challenge.team_id == team_id)
+        if boss_cycle is not None:
+            expressions1.append((Clan_challenge.boss_cycle == 1) if (boss_cycle == 1) else (Clan_challenge.boss_cycle >= 2))
+            expressions2.append((Clan_simulation_challenge.boss_cycle == 1) if (boss_cycle == 1) else (Clan_simulation_challenge.boss_cycle >= 2))
+        if boss_num is not None:
+            expressions1.append(Clan_challenge.boss_num == boss_num)
+            expressions2.append(Clan_simulation_challenge.boss_num == boss_num)
+
+        clist = Clan_challenge.select().where(*expressions1)
+
+        for c in clist:
+            if c.team_id == 0:
+                team = "未知"
+            else:
+                team = Clan_team.get_by_id(c.team_id).name
+            if mem_atkmap.get((team, 2 if c.boss_cycle >= 2 else 1, c.boss_num), None) is None:
+                mem_atkmap[(team, 2 if c.boss_cycle >= 2 else 1, c.boss_num)] = [c.challenge_damage]
+            else:
+                mem_atkmap[(team, 2 if c.boss_cycle >= 2 else 1, c.boss_num)].append(c.challenge_damage)
+        
+        clist = Clan_simulation_challenge.select().where(*expressions2)
+        for c in clist:
+            if c.team_id == 0:
+                team = "未知"
+            else:
+                team = Clan_team.get_by_id(c.team_id).name
+            if mem_atkmap.get((team, 2 if c.boss_cycle >= 2 else 1, c.boss_num), None) is None:
+                mem_atkmap[(team, 2 if c.boss_cycle >= 2 else 1, c.boss_num)] = [c.challenge_damage]
+            else:
+                mem_atkmap[(team, 2 if c.boss_cycle >= 2 else 1, c.boss_num)].append(c.challenge_damage)
+            
+        for team in mem_atkmap.keys():
+            record_count = len(mem_atkmap[team])
+            if record_count == 1:
+                value = mem_atkmap[team][0]
+            else:
+                array = np.array(mem_atkmap[team])
+                mu = np.mean(array)
+                sigma = np.std(array)
+                value = 2 * mu - stats.norm.ppf(0.8, loc=mu, scale=sigma)
+                #value = stats.norm.ppf(0.8, loc=mu, scale=sigma)
+            #attack_list.append((member.nickname, member.qqid, team[0], round(value), team[1], team[2]))
+            attack_list.append({
+                    "nickname": user.nickname,
+                    "qqid": qqid,
+                    "team": team[0],
+                    "damage": round(value),
+                    "boss_cycle": team[1],
+                    "boss_num": team[2],
+                    "record_count": record_count
+                })
+        return attack_list
+
+    
+    def output_attacks(self, group_id: Groupid):
+        group = Clan_group.get_or_none(group_id=group_id)
+        attack_list = []
+        members = []
+        for user in User.select(
+            User, Clan_member,
+            ).join(
+                Clan_member,
+                on=(User.qqid == Clan_member.qqid),
+                attr='clan_member',
+            ).where(
+                Clan_member.group_id == group_id,
+                User.deleted == False,
+            ):
+                members.append(user)
+        for member in members:
+            attack_list += self.query_user_attacks(group_id, member.qqid)
+            """
+            mem_atkmap = {}
+
+            clist = Clan_challenge.select().where(
+                Clan_challenge.qqid == member.qqid,
+                Clan_challenge.bid == group.battle_id,
+                Clan_challenge.gid == group_id,
+                Clan_challenge.boss_health_ramain != 0,
+                Clan_challenge.is_continue == False,
+            )
+
+            for c in clist:
+                if c.team_id == 0:
+                    team = "未知"
+                else:
+                    team = Clan_team.get_by_id(c.team_id).name
+                if mem_atkmap.get((team, 2 if c.boss_cycle >= 2 else 1, c.boss_num), None) is None:
+                    mem_atkmap[(team, 2 if c.boss_cycle >= 2 else 1, c.boss_num)] = [c.challenge_damage]
+                else:
+                    mem_atkmap[(team, 2 if c.boss_cycle >= 2 else 1, c.boss_num)].append(c.challenge_damage)
+            
+            clist = Clan_simulation_challenge.select().where(
+                Clan_simulation_challenge.qqid == member.qqid,
+                Clan_simulation_challenge.bid == group.battle_id,
+                Clan_simulation_challenge.gid == group_id,
+            )
+            for c in clist:
+                if c.team_id == 0:
+                    team = "未知"
+                else:
+                    team = Clan_team.get_by_id(c.team_id).name
+                if mem_atkmap.get((team, 2 if c.boss_cycle >= 2 else 1, c.boss_num), None) is None:
+                    mem_atkmap[(team, 2 if c.boss_cycle >= 2 else 1, c.boss_num)] = [c.challenge_damage]
+                else:
+                    mem_atkmap[(team, 2 if c.boss_cycle >= 2 else 1, c.boss_num)].append(c.challenge_damage)
+                
+            for team in mem_atkmap.keys():
+                record_count = len(mem_atkmap[team])
+                if record_count == 1:
+                    value = mem_atkmap[team][0]
+                else:
+                    array = np.array(mem_atkmap[team])
+                    mu = np.mean(array)
+                    sigma = np.std(array)
+                    value = 2 * mu - stats.norm.ppf(0.8, loc=mu, scale=sigma)
+                    #value = stats.norm.ppf(0.8, loc=mu, scale=sigma)
+                #attack_list.append((member.nickname, member.qqid, team[0], round(value), team[1], team[2]))
+                attack_list.append({
+                        "nickname": member.nickname,
+                        "qqid": member.qqid,
+                        "team": team[0],
+                        "damage": round(value),
+                        "boss_cycle": team[1],
+                        "boss_num": team[2],
+                        "record_count": record_count
+                    })
+            """
+        sorted_attacks = sorted(attack_list, key=lambda tup: tup["boss_num"])
+        return sorted_attacks
+
 
     def undo(self, group_id: Groupid, qqid: QQid) -> BossStatus:
         """
@@ -1062,6 +1354,7 @@ class ClanBattle:
         for c in Clan_challenge.select().where(
             *expressions
         ):
+            team = None if c.team_id == 0 else Clan_team.get_by_id(c.team_id).name
             report.append({
                 'battle_id': c.bid,
                 'qqid': c.qqid,
@@ -1079,6 +1372,7 @@ class ClanBattle:
                 'is_continue': c.is_continue,
                 'message': c.message,
                 'behalf': c.behalf,
+                'team': team
             })
         return report
 
@@ -1222,7 +1516,7 @@ class ClanBattle:
             return boss_summary
         elif match_num == 4:  # 报刀
             match = re.match(
-                r'^报刀 ?(\d+)([Ww万Kk千])? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
+                r'^报刀 *(\d+)([Ww万Kk千])? *(?:\[CQ:at,qq=(\d+)\])? *(?:[\(（] *(\S+) *[\)）])? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
             if not match:
                 return
             unit = {
@@ -1233,10 +1527,11 @@ class ClanBattle:
                 'K': 1000,
                 '千': 1000,
             }.get(match.group(2), 1)
+            team = match.group(4)
             damage = int(match.group(1)) * unit
             behalf = match.group(3) and int(match.group(3))
-            previous_day = bool(match.group(4))
-            extra_msg = match.group(5)
+            previous_day = bool(match.group(5))
+            extra_msg = match.group(6)
             if isinstance(extra_msg, str):
                 extra_msg = extra_msg.strip()
                 if not extra_msg:
@@ -1246,6 +1541,7 @@ class ClanBattle:
                     group_id,
                     user_id,
                     False,
+                    team,
                     damage,
                     behalf,
                     extra_msg=extra_msg,
@@ -1449,6 +1745,46 @@ class ClanBattle:
                 if m.get('message'):
                     reply += '：' + m['message']
             return reply
+        elif match_num == 26:
+            _logger.info("test")
+            match = re.match(
+                r'^模拟报刀 (\S+) (\d+)([Ww万Kk千])? *([一二])?([12345])? *(?:\[CQ:at,qq=(\d+)\])? *(?:[\:：](.*))?$', cmd)
+            if not match:
+                return
+            unit = {
+                'W': 10000,
+                'w': 10000,
+                '万': 10000,
+                'k': 1000,
+                'K': 1000,
+                '千': 1000,
+            }.get(match.group(3), 1)
+            team = match.group(1)
+            damage = int(match.group(2)) * unit
+            behalf = match.group(6) and int(match.group(6))
+            boss_cycle = {"一": 1, "二": 2}.get(match.group(4), None)
+            boss_num = match.group(5) and int(match.group(5))
+            extra_msg = match.group(7)
+            if isinstance(extra_msg, str):
+                extra_msg = extra_msg.strip()
+                if not extra_msg:
+                    extra_msg = None
+            try:
+                ret = self.simulation_challenge(
+                    group_id,
+                    user_id,
+                    team,
+                    damage,
+                    behalf,
+                    boss_cycle=boss_cycle,
+                    boss_num=boss_num,
+                    extra_msg=extra_msg
+                )
+            except ClanBattleError as e:
+                _logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+                return str(e)
+            _logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
+            return ret
 
     def register_routes(self, app: Quart):
 
@@ -1470,6 +1806,53 @@ class ClanBattle:
                 'clan/panel.html',
                 is_member=is_member,
             )
+
+        @app.route(
+            urljoin(self.setting['public_basepath'], 'clan/<int:group_id>/attacks_predict/csv'),
+            methods=['GET']
+        )
+        async def attacks_predict_csv(group_id):
+            if 'yobot_user' not in session:
+                return redirect(url_for('yobot_login', callback=request.path))
+            user = User.get_by_id(session['yobot_user'])
+            group = Clan_group.get_or_none(group_id=group_id)
+            if group is None:
+                return await render_template('404.html', item='公会'), 404
+            is_member = Clan_member.get_or_none(
+                group_id=group_id, qqid=session['yobot_user'])
+            if (not is_member and user.authority_group >= 10):
+                return await render_template('clan/unauthorized.html')
+            sorted_attacks = self.output_attacks(group_id)
+            output_foler = os.path.join(self.setting['dirname'], 'output')
+            output_file = os.path.join(output_foler, f"output-pred-{group_id}.csv")
+            with open(output_file, 'w', encoding="utf-8-sig", newline='') as write_obj:
+                csv_writer = csv.writer(write_obj)
+                csv_writer.writerow(["用户名称", "队伍名称", "伤害", "boss阶段", "boss编号"])
+                csv_writer.writerows(sorted_attacks)
+                write_obj.close()
+
+            return redirect(urljoin(
+                self.setting['public_address'],
+                '{}output/{}'.format(
+                    self.setting['public_basepath'], output_file)))
+
+        @app.route(
+            urljoin(self.setting['public_basepath'], 'clan/<int:group_id>/attacks_predict/api'),
+            methods=['GET']
+        )
+        async def attacks_predict_api(group_id):
+            if 'yobot_user' not in session:
+                return redirect(url_for('yobot_login', callback=request.path))
+            user = User.get_by_id(session['yobot_user'])
+            group = Clan_group.get_or_none(group_id=group_id)
+            if group is None:
+                return await render_template('404.html', item='公会'), 404
+            is_member = Clan_member.get_or_none(
+                group_id=group_id, qqid=session['yobot_user'])
+            if (not is_member and user.authority_group >= 10):
+                return await render_template('clan/unauthorized.html')
+            sorted_attacks = self.output_attacks(group_id)
+            return jsonify(sorted_attacks)
 
         @app.route(
             urljoin(self.setting['public_basepath'],
@@ -1613,6 +1996,7 @@ class ClanBattle:
                             status = self.challenge(group_id,
                                                     user_id,
                                                     True,
+                                                    payload['team'],
                                                     None,
                                                     payload['behalf'],
                                                     extra_msg=payload.get(
@@ -1643,6 +2027,7 @@ class ClanBattle:
                             status = self.challenge(group_id,
                                                     user_id,
                                                     False,
+                                                    payload['team'],
                                                     payload['damage'],
                                                     payload['behalf'],
                                                     extra_msg=payload.get(

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+
+<head>
+    <title>刀伤统计</title>
+    <meta name='viewport' content='width=1485' charset="utf-8" />
+    <script src="https://cdn.bootcdn.net/ajax/libs/vue/2.6.11/vue.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/axios/0.19.2/axios.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/element-ui/2.13.0/index.js"></script>
+    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/element-ui/2.13.0/theme-chalk/index.css">
+    <style>
+        .el-table .hidden-row {
+            display: none;
+        }
+        .el-table__header-wrapper .el-checkbox {
+            display: none
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <el-button icon="el-icon-back" @click="location='..'"></el-button>
+        <el-table :data="tableData" @selection-change="handleSelectionChange" :row-class-name="tableRowClassName">
+            <el-table-column type="selection" width="55"></el-table-column>
+            <el-table-column prop="nickname" label="昵称" width="200" sortable></el-table-column>
+            <el-table-column prop="qqid" label="QQ号" width="120" sortable></el-table-column>
+            <el-table-column prop="team" label="队伍名" width="200" sortable></el-table-column>
+            <el-table-column prop="damage" label="统计伤害" width="200" sortable></el-table-column>
+            <el-table-column prop="boss_cycle" label="boss阶段" :filter-method="handleFilter"
+                :filters="[{ text: '1', value: 1 }, { text: '2', value: 2 }]" width="200" sortable></el-table-column>
+            <el-table-column prop="boss_num" label="boss编号" width="200" :filter-method="handleFilter"
+                :filters="[{ text: '1', value: 1 }, { text: '2', value: 2 }, { text: '3', value: 3 }, { text: '4', value: 4 }, { text: '5', value: 5 }]"
+                sortable></el-table-column>
+            <el-table-column prop="record_count" label="符合记录数" width="200" sortable></el-table-column>
+        </el-table>
+    </div>
+</body>
+<script>
+    var app = new Vue({
+        el: '#app',
+        data: {
+            tableData: [],
+            bosses: []
+        },
+        methods: {
+            ts2ds: function (timestamp) {
+                var d = new Date();
+                d.setTime(timestamp * 1000);
+                return d;
+            },
+            handleFilter: function (value, row, column) {
+                const property = column['property'];
+                return row[property] === value;
+            },
+            handleSelectionChange: function (vals) {
+                for (let i of this.tableData) {
+                    i.hidden = false;
+                }
+                for (const item of vals) {
+                    for (let i of this.tableData) {
+                        if (item.qqid == i.qqid && item.team == i.team) {
+                            console.log(i);
+                            i.hidden = true;
+                        }
+                    }
+                }
+            },
+            tableRowClassName: function (row, index) {
+                console.log(row, index);
+                if (row.hidden) {
+                    return 'hidden-row';
+                }
+                return '';
+            }
+        },
+        mounted: function () {
+            _this = this
+            axios.get("../../attacks_predict/api").then(function (stats) {
+                //if (stats.data.code != 0) {
+                //    _this.$alert(res.data.message, '获取数据失败');
+                //    return
+                //}
+                //qqidMap = stats.data.members.reduce(function (map, i) {
+                //    map[i.qqid] = i.nickname;
+                //    return map
+                //}, {})
+                for (i of stats.data) {
+                    i.hidden = false;
+                    _this.tableData.push(i);
+                }
+            })
+
+        },
+        delimiters: ['[[', ']]'],
+    })
+</script>
+
+
+</html>

@@ -68,6 +68,9 @@
                   <template slot="prepend">[[ damageHint ]]</template>
                 </el-input>
               </el-form-item>
+              <el-form-item label="队伍" label-width="120">
+                <el-input v-model="team" placeholder="必填"></el-input>
+              </el-form-item>
               <el-form-item label="留言" label-width="120">
                 <el-input v-model="message" placeholder="（选填）"></el-input>
               </el-form-item>
@@ -78,8 +81,11 @@
             </div>
           </el-dialog>
           <el-col :span="6"><el-button type="success" size="small" @click="recordDefeatVisible = true">上报尾刀</el-button></el-col>
-          <el-dialog title="上报伤害" :visible.sync="recordDefeatVisible">
+          <el-dialog title="上报尾刀" :visible.sync="recordDefeatVisible">
             <el-form>
+              <el-form-item label="队伍" label-width="120">
+                <el-input v-model="team" placeholder="必填"></el-input>
+              </el-form-item>
               <el-form-item label="留言" label-width="120">
                 <el-input v-model="message" placeholder="（选填）"></el-input>
               </el-form-item>
@@ -107,6 +113,9 @@
                 <el-input v-model.number="damage" :disabled="defeat"{#  @keyup.enter.native="recorddamage" #}>
                   <template slot="prepend">[[ damageHint ]]</template>
                 </el-input>
+              </el-form-item>
+              <el-form-item label="队伍" label-width="120">
+                <el-input v-model="team" placeholder="必填"></el-input>
               </el-form-item>
               <el-form-item label="留言" label-width="120">
                 <el-input v-model="message" placeholder="（选填）"></el-input>

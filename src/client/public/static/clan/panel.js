@@ -12,6 +12,7 @@ var vm = new Vue({
         today_sl: false,
         members: [],
         damage: 0,
+        team: null,
         defeat: null,
         behalf: null,
         boss_num: null,
@@ -160,6 +161,7 @@ var vm = new Vue({
                 defeat: false,
                 damage: this.damage,
                 behalf: null,
+                team: this.team,
                 message:this.message,
             });
             this.recordFormVisible = false;
@@ -169,6 +171,7 @@ var vm = new Vue({
                 action: 'addrecord',
                 defeat: true,
                 behalf: null,
+                team: this.team,
                 message:this.message,
             });
             this.recordDefeatVisible = false;
@@ -179,6 +182,7 @@ var vm = new Vue({
                 defeat: this.defeat,
                 behalf: this.behalf,
                 damage: this.damage,
+                team: this.team,
                 message:this.message,
             });
             this.recordBehalfVisible = false;
