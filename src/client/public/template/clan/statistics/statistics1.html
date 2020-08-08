@@ -21,10 +21,11 @@
             <el-table-column prop="qqid" label="QQ号" width="120" sortable></el-table-column>
             <el-table-column prop="nickname" label="昵称" width="200" sortable></el-table-column>
             <el-table-column prop="damage" label="伤害" width="200" sortable></el-table-column>
+			<el-table-column prop="team" label="队伍名" width="200" sortable></el-table-column>
             <el-table-column prop="boss" label="boss" :filter-method="handleFilter" :filters="bosses" width="200"
                 sortable>
             </el-table-column>
-
+            <el-table-column prop="health_ramain" label="BOSS 剩余血量" width="200" sortable></el-table-column>
             <el-table-column prop="status" label="状态" width="200" :filter-method="handleFilter"
                 :filters="[{ text: '普通', value: '普通' }, { text: '尾刀', value: '尾刀' },{ text: '剩余刀', value: '剩余刀' },{ text: '余尾刀', value: '余尾刀' }]"
                 sortable></el-table-column>
@@ -72,7 +73,10 @@
                     t.nickname = qqidMap[i.qqid]
                     t.boss = i.boss_num
                     t.damage = i.damage
+                    t.team = i.team
+                    t.health_ramain = i.health_ramain
                     t.status = DMG_TYPE[(i.health_ramain === 0)*2+(i.is_continue)]
+					console.log(t)
                     _this.tableData.push(t)
                 }
                 t = 1

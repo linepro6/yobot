@@ -19,7 +19,7 @@
             <label>每日钻石赠送数：<input v-model.number="config.settings.daily_jewels_count" /></label><br>
             额外卡池管理员 QQ 号：（拥有修改卡池和充值的权限，机器人主人已包括在内无需额外填写）<br>
             <input v-for="(item, ikey) in config.settings.extra_gacha_admin_qqid"
-                v-model="config.settings.extra_gacha_admin_qqid[ikey]" placeholder="请输入QQ号" />
+                v-model.number="config.settings.extra_gacha_admin_qqid[ikey]" placeholder="请输入QQ号" />
             <button @click="config.settings.extra_gacha_admin_qqid.push(null)">添加</button>
             <button @click="config.settings.extra_gacha_admin_qqid.pop()">删除</button>
         </div>

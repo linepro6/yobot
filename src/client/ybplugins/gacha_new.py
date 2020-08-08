@@ -53,7 +53,7 @@ class GachaInfo:
         self.up_count: int = 0                      # 获得卡池 UP 角色的数量
         self.first_up: int = 0                      # 首次获得 UP 角色的抽取数
         self.add_hiishi: int = 0                    # 增加的女神的秘石数量
-        self.pool: GachaPool                        # 所抽的卡池
+        self.pool: GachaPool = pool                 # 所抽的卡池
 
     def append(self, item: GachaItem, new: bool):
         """接受抽卡结果项以建立统计数据
@@ -392,7 +392,7 @@ class GachaNew:
             if 'yobot_user' not in session:
                 return "未登录", 401
             user = User.get_by_id(session['yobot_user'])
-            if user.authority_group != 1:
+            if user.qqid not in self.admin_list:
                 return "无权访问", 403
             if request.method == "GET":
                 with open(self.gacha_config_path, "r", encoding="utf-8") as f:
@@ -742,7 +742,7 @@ class GachaNew:
             str: 相关卡池信息
         """
         msg = []
-        if gacha_name == "":
+        if gacha_name == "" or gacha_name is None:
             return self.check_all_pools()
         else:
             pool = self.gacha_mgr.get_pool(gacha_name)

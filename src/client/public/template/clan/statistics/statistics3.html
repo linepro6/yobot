@@ -35,6 +35,8 @@
         </el-table>
     </div>
 </body>
+<script src="https://cdn.jsdelivr.net/npm/vue-resource@1.5.1/dist/vue-resource.min.js"
+    integrity="sha256-e9WxLR4DOP5XKMT4mflXVovZS4mVdiMkAFSDHF+6q80=" crossorigin="anonymous"></script>
 <script>
     var app = new Vue({
         el: '#app',
@@ -75,21 +77,19 @@
         },
         mounted: function () {
             _this = this
-            axios.get("../../attacks_predict/api").then(function (stats) {
-                //if (stats.data.code != 0) {
-                //    _this.$alert(res.data.message, '获取数据失败');
-                //    return
-                //}
-                //qqidMap = stats.data.members.reduce(function (map, i) {
-                //    map[i.qqid] = i.nickname;
-                //    return map
-                //}, {})
-                for (i of stats.data) {
+            this.$http.get('../../attacks_predict/api').then(response => {
+                const data = response.body;
+                for (i of data) {
                     i.hidden = false;
-                    _this.tableData.push(i);
+                    if (i.damage == null) {
+                        i.damage = "拟合失败";
+                    }
+                    this.tableData.push(i);
                 }
-            })
-
+            }, response => {
+                // error callback
+                console.log(response);
+            });
         },
         delimiters: ['[[', ']]'],
     })

@@ -61,7 +61,7 @@ var vm = new Vue({
             if (cha == undefined) {
                 return '';
             }
-            return `(${cha.cycle}-${cha.boss_num}) <a class="digit${cha.damage.toString().length}">${cha.damage}</a>`;
+            return `(${cha.cycle}-${cha.boss_num}) <a class="digit${cha.damage.toString().length}">${cha.damage}</a><br><span style="font-size: 5px;">${cha.team}</span>`;
         },
         cdetail: function (cha) {
             if (cha == undefined) {

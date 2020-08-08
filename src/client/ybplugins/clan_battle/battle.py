@@ -333,12 +333,22 @@ class ClanBattle:
                 or group.challenging_member_qq_id
             )
         report = self.get_report(group_id, None, None, pcr_datetime(group.game_server)[0])
+        boss_count = 0
         count = 0
         for x in report:
-            if x['health_ramain'] == 0 or x['is_continue']: count += 0.5
-            else: count += 1
+            if x['health_ramain'] == 0 or x['is_continue']:
+                count += 0.5
+                if x['cycle'] == group.boss_cycle and x['boss_num'] == group.boss_num:
+                    boss_count += 0.5
+            else:
+                count += 1
+                if x['cycle'] == group.boss_cycle and x['boss_num'] == group.boss_num:
+                    boss_count += 1
         if count == int(count):
             count = int(count)
+        if boss_count == int(boss_count):
+            boss_count = int(boss_count)
+        boss_summary += "\n今日已对当前 BOSS 出了 {} 刀，".format(boss_count)
         boss_summary += "\n今日已出 {} 刀。".format(count)
         return boss_summary
 
@@ -545,7 +555,7 @@ class ClanBattle:
 
         challenge.save()
 
-        return "该模拟刀已成功记录"
+        return f"[CQ:at,qq={user.qqid}]，该模拟刀已成功记录"
     
     """
     def queue_attack(self, group_id: Groupid, prob, boss_cycle: Optional[int]=None, boss_num: Optional[int]=None):
@@ -625,6 +635,18 @@ class ClanBattle:
         attack_list = []
         mem_atkmap = {}
 
+        date = pcr_datetime(area=group.game_server)[0]
+        clist = Clan_challenge.select().where(
+            Clan_challenge.qqid == qqid,
+            Clan_challenge.bid == group.battle_id,
+            Clan_challenge.gid == group_id,
+            Clan_challenge.challenge_pcrdate == date
+        )
+        explist = []
+        for c in clist:
+            explist.append(Clan_team.get_by_id(c.team_id).name)
+
+
         expressions1 = [
             Clan_challenge.qqid == qqid,
             Clan_challenge.bid == group.battle_id,
@@ -656,6 +678,8 @@ class ClanBattle:
                 team = "未知"
             else:
                 team = Clan_team.get_by_id(c.team_id).name
+            if team in explist:
+                continue
             if mem_atkmap.get((team, 2 if c.boss_cycle >= 2 else 1, c.boss_num), None) is None:
                 mem_atkmap[(team, 2 if c.boss_cycle >= 2 else 1, c.boss_num)] = [c.challenge_damage]
             else:
@@ -667,6 +691,8 @@ class ClanBattle:
                 team = "未知"
             else:
                 team = Clan_team.get_by_id(c.team_id).name
+            if team in explist:
+                continue
             if mem_atkmap.get((team, 2 if c.boss_cycle >= 2 else 1, c.boss_num), None) is None:
                 mem_atkmap[(team, 2 if c.boss_cycle >= 2 else 1, c.boss_num)] = [c.challenge_damage]
             else:
@@ -687,7 +713,7 @@ class ClanBattle:
                     "nickname": user.nickname,
                     "qqid": qqid,
                     "team": team[0],
-                    "damage": round(value),
+                    "damage": None if str(value) == "nan" else round(value),
                     "boss_cycle": team[1],
                     "boss_num": team[2],
                     "record_count": record_count
@@ -696,7 +722,6 @@ class ClanBattle:
 
     
     def output_attacks(self, group_id: Groupid):
-        group = Clan_group.get_or_none(group_id=group_id)
         attack_list = []
         members = []
         for user in User.select(
@@ -954,6 +979,10 @@ class ClanBattle:
         Clan_challenge.delete().where(
             Clan_challenge.gid == group_id,
             Clan_challenge.bid == battle_id,
+        ).execute()
+        Clan_simulation_challenge.delete().where(
+            Clan_simulation_challenge.gid == group_id,
+            Clan_simulation_challenge.bid == battle_id
         ).execute()
         Clan_subscribe.delete().where(
             Clan_subscribe.gid == group_id,
@@ -1516,7 +1545,7 @@ class ClanBattle:
             return boss_summary
         elif match_num == 4:  # 报刀
             match = re.match(
-                r'^报刀 *(\d+)([Ww万Kk千])? *(?:\[CQ:at,qq=(\d+)\])? *(?:[\(（] *(\S+) *[\)）])? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
+                r'^报刀 *(\d+)([Ww万Kk千])? *(\S+?)? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
             if not match:
                 return
             unit = {
@@ -1527,9 +1556,11 @@ class ClanBattle:
                 'K': 1000,
                 '千': 1000,
             }.get(match.group(2), 1)
-            team = match.group(4)
+            team = match.group(3)
+            if team == "[CQ":
+                return "必须提供队伍名称"
             damage = int(match.group(1)) * unit
-            behalf = match.group(3) and int(match.group(3))
+            behalf = match.group(4) and int(match.group(4))
             previous_day = bool(match.group(5))
             extra_msg = match.group(6)
             if isinstance(extra_msg, str):
@@ -1553,12 +1584,15 @@ class ClanBattle:
             return str(boss_status)
         elif match_num == 5:  # 尾刀
             match = re.match(
-                r'^尾刀 ?(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
+                r'^尾刀 *(\S+?)? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
             if not match:
                 return
-            behalf = match.group(1) and int(match.group(1))
-            previous_day = bool(match.group(2))
-            extra_msg = match.group(3)
+            behalf = match.group(2) and int(match.group(2))
+            previous_day = bool(match.group(3))
+            team = match.group(1)
+            if team == "[CQ":
+                return "必须提供队伍名称"
+            extra_msg = match.group(4)
             if isinstance(extra_msg, str):
                 extra_msg = extra_msg.strip()
                 if not extra_msg:
@@ -1568,6 +1602,7 @@ class ClanBattle:
                     group_id,
                     user_id,
                     True,
+                    team,
                     None,
                     behalf,
                     extra_msg=extra_msg,
@@ -1717,6 +1752,26 @@ class ClanBattle:
             )
             return f'公会战面板：\n{url}\n建议添加到浏览器收藏夹或桌面快捷方式'
         elif match_num == 16:  # SL
+            match = re.match(r"^[Ss][Ll] *([?？])? *(?:\[CQ:at,qq=(\d+)\])? *$", cmd)
+            if not match:
+                return
+            user_id = int(match.group(2)) if match.group(2) is not None else user_id
+            if match.group(1) is None:
+                try:
+                    self.save_slot(group_id, user_id)
+                except ClanBattleError as e:
+                    _logger.info('群聊 失败 {} {} {}'.format(
+                        user_id, group_id, cmd))
+                    return str(e)
+                _logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
+                return f'已为 [CQ:at,qq={user_id}] 记录SL'
+            else:
+                sl_ed = self.save_slot(group_id, user_id, only_check=True)
+                if sl_ed:
+                    return f'今日 [CQ:at,qq={user_id}] 已使用SL'
+                else:
+                    return f'今日 [CQ:at,qq={user_id}] 未使用SL'
+            """
             if len(cmd) == 2:
                 try:
                     self.save_slot(group_id, user_id)
@@ -1732,6 +1787,7 @@ class ClanBattle:
                     return '今日已使用SL'
                 else:
                     return '今日未使用SL'
+            """
         elif 20 <= match_num <= 25:
             if len(cmd) != 2:
                 return
@@ -1746,45 +1802,74 @@ class ClanBattle:
                     reply += '：' + m['message']
             return reply
         elif match_num == 26:
-            _logger.info("test")
-            match = re.match(
-                r'^模拟报刀 (\S+) (\d+)([Ww万Kk千])? *([一二])?([12345])? *(?:\[CQ:at,qq=(\d+)\])? *(?:[\:：](.*))?$', cmd)
-            if not match:
-                return
-            unit = {
-                'W': 10000,
-                'w': 10000,
-                '万': 10000,
-                'k': 1000,
-                'K': 1000,
-                '千': 1000,
-            }.get(match.group(3), 1)
-            team = match.group(1)
-            damage = int(match.group(2)) * unit
-            behalf = match.group(6) and int(match.group(6))
-            boss_cycle = {"一": 1, "二": 2}.get(match.group(4), None)
-            boss_num = match.group(5) and int(match.group(5))
-            extra_msg = match.group(7)
-            if isinstance(extra_msg, str):
-                extra_msg = extra_msg.strip()
-                if not extra_msg:
-                    extra_msg = None
-            try:
-                ret = self.simulation_challenge(
-                    group_id,
-                    user_id,
-                    team,
-                    damage,
-                    behalf,
-                    boss_cycle=boss_cycle,
-                    boss_num=boss_num,
-                    extra_msg=extra_msg
-                )
-            except ClanBattleError as e:
-                _logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
-                return str(e)
-            _logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
-            return ret
+            stage_dict = {
+                "a": 1,
+                "b": 2,
+                "c": 3,
+                "d": 4,
+                "A": 1,
+                "B": 2,
+                "C": 3,
+                "D": 4
+            }
+
+            han_count = ["零", "一", "二", "三", "四", "五"]
+            han_boss_dict = {
+                "一": 1,
+                "二": 2,
+                "三": 3,
+                "四": 4,
+                "五": 5
+            }
+            regexs = [
+                r'^模拟报刀 *(\d+)([Ww万Kk千])? *(\S+?) *([abcdABCD])? *([一二三四五])? *(?:\[CQ:at,qq=(\d+)\])? *(?:[\:：](.*))?$',
+                r'^模拟报刀 *撤销$'
+            ]
+            for index, regex in enumerate(regexs):
+                match = re.match(regex, cmd)
+                if not match:
+                    continue
+                if index == 0:
+                    unit = {
+                        'W': 10000,
+                        'w': 10000,
+                        '万': 10000,
+                        'k': 1000,
+                        'K': 1000,
+                        '千': 1000,
+                    }.get(match.group(2), 1)
+                    team = match.group(3)
+                    damage = int(match.group(1)) * unit
+                    behalf = match.group(6) and int(match.group(6))
+                    boss_cycle = stage_dict.get(match.group(4), None)
+                    boss_num = han_boss_dict.get(match.group(5), None)
+                    extra_msg = match.group(7)
+                    if isinstance(extra_msg, str):
+                        extra_msg = extra_msg.strip()
+                        if not extra_msg:
+                            extra_msg = None
+                    try:
+                        ret = self.simulation_challenge(
+                            group_id,
+                            user_id,
+                            team,
+                            damage,
+                            behalf,
+                            boss_cycle=boss_cycle,
+                            boss_num=boss_num,
+                            extra_msg=extra_msg
+                        )
+                    except ClanBattleError as e:
+                        _logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+                        return str(e)
+                    _logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
+                    return ret
+                if index == 1:
+                    rec = Clan_simulation_challenge.select().order_by(Clan_simulation_challenge.cid.desc()).limit(1)
+                    if len(rec) == 0:
+                        return "本群无模拟刀的记录"
+                    Clan_simulation_challenge.delete().where(Clan_simulation_challenge.cid == rec[0].cid)
+                    return "上一条模拟刀记录撤销成功"
 
     def register_routes(self, app: Quart):
 
@@ -1851,6 +1936,8 @@ class ClanBattle:
                 group_id=group_id, qqid=session['yobot_user'])
             if (not is_member and user.authority_group >= 10):
                 return await render_template('clan/unauthorized.html')
+
+
             sorted_attacks = self.output_attacks(group_id)
             return jsonify(sorted_attacks)
 
